@@ -24,7 +24,6 @@
     pre { margin:0; font-family:inherit; }
     .danger { color:#b00020; font-weight:600; }
 
-    /* -----estilo pequeño para botón de ver contraseña --- */
     .pw-inline { display:flex; gap:6px; align-items:center; }
     .pw-inline button { padding:6px 8px; border-radius:8px; border:1px solid #e6e6ee; background:white; cursor:pointer; }
   </style>
@@ -81,17 +80,15 @@
   </div>
 
   <script>
-    // ---------------------
-    // Reuso la lógica de sustitución original (opcional)
-    // ---------------------
+   
     const alphabet = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','ñ','o','p','q','r','s','t','u','v','w','x','y','z'];
     const signLetters = ['c','g','k','ñ','r','t','v','x','z'];
     const signPool = ['.','_','-','}','{','¨¨','ǂ','+','*','♡','𓂅','ꈍ','|','@','¿','?','=','/','&','%','$','#','!',';',',',':'];
     const numLetters = ['e','i','m','p','s','u','w','y','a'];
     const digitPool = ['1','2','3','4','5','6','7','8','9'];
-    const shiftLetters = ['b','d','f','h','j','l','n','o','q'];
+    const shiftLetters = ['b','d','f','h','j','l','n','o','q'
 
-    // tokenizador para decryption de obfuscación solo
+                          
     const signPoolByLength = [...signPool].sort((a,b)=>b.length-a.length);
     function tokenizeForDecryption(text) {
       const tokens=[]; let i=0;
@@ -133,13 +130,10 @@
       return token;
     }
 
-    // Aplica la obfuscación con un shift numérico (recomendado usar un shift aleatorio o derivado de la clave)
     function applyObfuscation(text, shift){ let out=''; for(const ch of text){ out += encryptCharObf(ch, shift); } return out; }
     function removeObfuscation(text, shift){ const tokens = tokenizeForDecryption(text); return tokens.map(t=>decryptTokenObf(t,shift)).join(''); }
 
-    // ---------------------
-    // UTILIDADES de Web Crypto
-    // ---------------------
+
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
@@ -179,13 +173,9 @@
       return text;
     }
 
-    // ---------------------
-    // UI / Flujos
-    // ---------------------
     let mode = 'encrypt';
     function setMode(m){
       mode = m;
-      // limpiar input text al cambiar a modo "decrypt"
       if (m === 'decrypt') {
         document.getElementById('inputText').value = '';
       }
@@ -202,7 +192,7 @@
       compress: document.getElementById('compress').checked
     } }
 
-    /* --- MOD: función para envolver líneas a 90 caracteres --- */
+
     function wrapLines(s, width = 90) {
       if (!s) return s;
       let out = '';
@@ -213,7 +203,7 @@
       return out;
     }
 
-    /* --- MOD: toggle mostrar/ocultar contraseña --- */
+  
     function togglePassword(){
       const el = document.getElementById('password');
       if (!el) return;
@@ -225,10 +215,10 @@
         const ui = getUI();
         if(!ui.password){ if(!confirm('No ha introducido contraseña. ¿Desea continuar (no recomendado)?')) return; }
         let payload = ui.text;
-        // Aplicar obfuscación si lo desea: usamos un shift derivado de la contraseña (hash simple) para evitar que el shift sea fácil de adivinar
+       
         let shift = 3;
         if(ui.useObf){
-          // derive a simple numeric shift from the password (not secret; but ties obfuscation to password)
+
           if(ui.password){
             const pwHash = await crypto.subtle.digest('SHA-256', enc.encode(ui.password));
             const arr = new Uint8Array(pwHash);
@@ -241,11 +231,11 @@
         }
 
         const pkg = await encryptWithPassword(payload, ui.password, ui.compress);
-        // incluir metadatos: obf flag y shift
+
         const full = { salt: pkg.salt, iv: pkg.iv, ct: pkg.ct, obf: !!ui.useObf, shift: ui.useObf? shift : 0 };
         const outString = JSON.stringify(full);
 
-        // --- MOD: al mostrar el JSON base64, lo rompemos en líneas de 90 caracteres ---
+
         document.getElementById('output').innerText = wrapLines(btoa(outString), 90);
 
       } catch(e){ console.error(e); alert('Error durante el cifrado: '+e.message); }
@@ -261,7 +251,7 @@
         const pkg = { salt: decoded.salt, iv: decoded.iv, ct: decoded.ct };
         const plain = await decryptWithPassword(pkg, ui.password, ui.compress);
         let output = plain;
-        if(decoded.obf){ // si había obfuscación, quitarla usando shift
+        if(decoded.obf){ 
           output = removeObfuscation(plain, decoded.shift);
         }
         document.getElementById('output').innerText = output;
@@ -277,3 +267,4 @@
   </script>
 </body>
 </html>
+
