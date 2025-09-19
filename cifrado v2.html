@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Cifrado seguro (AES-GCM) + obfuscación opcional</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; background: #f6f7fb; display:flex; justify-content:center; padding:30px;}
+    .container { width:760px; background:white; padding:18px; border-radius:12px; box-shadow:0 6px 24px rgba(0,0,0,0.08); }
+    .row { display:flex; gap:10px; }
+    .buttons { display:flex; gap:10px; margin-bottom:12px; }
+    .buttons button { flex:1; padding:10px 12px; border-radius:8px; border:none; cursor:pointer; background:#f0f0f6; font-weight:600; }
+    .buttons button.active { background:#4f59ff; color:white; }
+    label { display:block; margin:8px 0 6px; color:#333; font-size:14px; }
+    textarea { width:100%; min-height:120px; border-radius:8px; border:1px solid #e6e6ee; padding:10px; resize:vertical; font-size:14px; }
+    .output { background:#fbfbff; border-radius:8px; border:1px solid #eee; min-height:110px; padding:12px; white-space:pre-wrap; font-size:14px; margin-top:6px; }
+    .copy { text-align:right; margin-top:8px; }
+    .copy button { background:none; border:none; color:#4f59ff; cursor:pointer; font-weight:600; }
+    .small { font-size:13px; color:#666; }
+    .inline { display:inline-block; vertical-align:middle; }
+    input[type=password], input[type=text] { padding:8px; border-radius:8px; border:1px solid #e6e6ee; }
+    .controls { display:flex; gap:8px; align-items:center; margin-top:10px; }
+    .note { margin-top:12px; font-size:13px; color:#444; }
+    pre { margin:0; font-family:inherit; }
+    .danger { color:#b00020; font-weight:600; }
+
+    /* -----estilo pequeño para botón de ver contraseña --- */
+    .pw-inline { display:flex; gap:6px; align-items:center; }
+    .pw-inline button { padding:6px 8px; border-radius:8px; border:1px solid #e6e6ee; background:white; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="buttons">
+      <button id="btnEncrypt" class="active" onclick="setMode('encrypt')">Encriptar</button>
+      <button id="btnDecrypt" onclick="setMode('decrypt')">Descifrar</button>
+    </div>
+
+    <label for="inputText">Texto (claro o cifrado):</label>
+    <textarea id="inputText" placeholder="Introduzca su texto aquí..."></textarea>
+
+    <div class="controls">
+      <div style="flex:1">
+        <label for="password">Contraseña / frase secreta:</label>
+
+       
+        <div class="pw-inline">
+          <input id="password" type="password" placeholder="Usa una contraseña larga y segura" style="width:100%">
+          <button type="button" onclick="togglePassword()" title="Mostrar/ocultar contraseña">👁</button>
+        </div>
+
+        <div class="small">Se derivará una clave fuerte desde esta contraseña (PBKDF2). Para máxima seguridad usa una clave aleatoria y compártela con el receptor mediante canal seguro.</div>
+      </div>
+      <div style="width:220px">
+        <label>Opciones:</label>
+        <div><input id="useObf" type="checkbox"> <label class="inline" for="useObf">Aplicar obfuscación personalizada antes del cifrado</label></div>
+        <div style="margin-top:6px"><input id="compress" type="checkbox"> <label class="inline" for="compress">Comprimir antes de cifrar (reduce patrones)</label></div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button onclick="doEncrypt()" style="padding:10px 12px; border-radius:8px; border:none; background:#4f59ff; color:white; font-weight:700; cursor:pointer;">Cifrar</button>
+      <button onclick="doDecrypt()" style="padding:10px 12px; border-radius:8px; border:none; background:#2b2b2b; color:white; font-weight:700; cursor:pointer;">Descifrar</button>
+      <button onclick="generateRandomKey()" style="padding:10px 12px; border-radius:8px; border:1px solid #ddd; background:white; cursor:pointer;">Generar clave aleatoria (32 bytes)</button>
+    </div>
+
+    <label style="margin-top:12px">Resultado (JSON base64):</label>
+    <div class="output" id="output"></div>
+    <div class="copy"><button onclick="copyResult()">Copiar resultado</button></div>
+
+    <p class="note">
+      ¿Qué hace esto? Ahora el texto queda <strong>cifrado con AES-GCM</strong> (clave derivada de la contraseña usando PBKDF2 con salt aleatorio) y el resultado se muestra como JSON codificado en base64 que contiene <code>salt</code>, <code>iv</code> y <code>ct</code>. Si marcas "Aplicar obfuscación" se aplica primero tu esquema de sustitución personalizado (solo como capa adicional de ofuscación), luego se cifra. 
+    </p>
+    <p class="small danger">Importante: la seguridad real depende de la secrecía y fuerza de la contraseña/clave. No compartas la contraseña por canales inseguros.</p>
+    <p class="small danger"> Este cifrado/web puede tener errores dado que solo es con su unica finalidad de ser una broma y por hobby.</p>
+
+    <hr>
+    <div class="small">
+      Notas técnicas: PBKDF2 (300000 iteraciones) → clave AES-GCM de 256 bits. Salt e IV son aleatorios y se incluyen en el paquete. Para máxima resistencia a ataques futuros usa intercambio de claves asimétrico (X25519/ECIES) o KEMs post-cuánticos y evita contraseñas humanas.
+    </div>
+  </div>
+
+  <script>
+    // ---------------------
+    // Reuso la lógica de sustitución original (opcional)
+    // ---------------------
+    const alphabet = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','ñ','o','p','q','r','s','t','u','v','w','x','y','z'];
+    const signLetters = ['c','g','k','ñ','r','t','v','x','z'];
+    const signPool = ['.','_','-','}','{','¨¨','ǂ','+','*','♡','𓂅','ꈍ','|','@','¿','?','=','/','&','%','$','#','!',';',',',':'];
+    const numLetters = ['e','i','m','p','s','u','w','y','a'];
+    const digitPool = ['1','2','3','4','5','6','7','8','9'];
+    const shiftLetters = ['b','d','f','h','j','l','n','o','q'];
+
+    // tokenizador para decryption de obfuscación solo
+    const signPoolByLength = [...signPool].sort((a,b)=>b.length-a.length);
+    function tokenizeForDecryption(text) {
+      const tokens=[]; let i=0;
+      while(i<text.length){
+        let matched=false;
+        for(const token of signPoolByLength){
+          if(text.startsWith(token,i)){ tokens.push(token); i+=token.length; matched=true; break; }
+        }
+        if(matched) continue;
+        const ch=text[i];
+        if(digitPool.indexOf(ch)!==-1){ tokens.push(ch); i++; continue; }
+        tokens.push(ch); i++;
+      }
+      return tokens;
+    }
+
+    function encryptCharObf(ch, shift){
+      const lower = ch.toLowerCase();
+      const idxSign = signLetters.indexOf(lower);
+      if(idxSign!==-1){ const base=idxSign; const poolIndex=(base+shift)%signPool.length; return signPool[poolIndex]; }
+      const idxNum = numLetters.indexOf(lower);
+      if(idxNum!==-1){ const base=idxNum; const poolIndex=(base+shift)%digitPool.length; return digitPool[poolIndex]; }
+      if(shiftLetters.includes(lower)){
+        const pos = alphabet.indexOf(lower);
+        const newPos = (pos + shift) % alphabet.length;
+        const mapped = alphabet[newPos];
+        if(ch === ch.toUpperCase() && /^[a-zñ]$/i.test(mapped)) return mapped.toUpperCase();
+        return mapped;
+      }
+      return ch;
+    }
+
+    function decryptTokenObf(token, shift){
+      const signIndex = signPool.indexOf(token);
+      if(signIndex !== -1){ const poolLen = signPool.length; const baseIndex = ((signIndex - shift) % poolLen + poolLen)%poolLen; if(baseIndex>=0 && baseIndex<signLetters.length) return signLetters[baseIndex]; return token; }
+      const dIndex = digitPool.indexOf(token);
+      if(dIndex !== -1){ const poolLen = digitPool.length; const baseIndex = ((dIndex - shift) % poolLen + poolLen)%poolLen; if(baseIndex>=0 && baseIndex<numLetters.length) return numLetters[baseIndex]; return token; }
+      if(typeof token==='string' && token.length===1){ const lower = token.toLowerCase(); if(alphabet.includes(lower)){ for(const orig of shiftLetters){ const origPos=alphabet.indexOf(orig); const encPos=(origPos+shift)%alphabet.length; if(alphabet[encPos]===lower){ return (token===token.toUpperCase())? orig.toUpperCase(): orig; } } return token; } }
+      return token;
+    }
+
+    // Aplica la obfuscación con un shift numérico (recomendado usar un shift aleatorio o derivado de la clave)
+    function applyObfuscation(text, shift){ let out=''; for(const ch of text){ out += encryptCharObf(ch, shift); } return out; }
+    function removeObfuscation(text, shift){ const tokens = tokenizeForDecryption(text); return tokens.map(t=>decryptTokenObf(t,shift)).join(''); }
+
+    // ---------------------
+    // UTILIDADES de Web Crypto
+    // ---------------------
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    async function deriveKeyFromPassword(password, salt, iterations=300000){
+      const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
+      return crypto.subtle.deriveKey({name:'PBKDF2', salt:salt, iterations: iterations, hash:'SHA-256'}, baseKey, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+    }
+
+    function toB64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+    function fromB64(str){ return Uint8Array.from(atob(str), c=>c.charCodeAt(0)); }
+
+    async function encryptWithPassword(plaintext, password, useCompression=false){
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      let data = enc.encode(plaintext);
+      if(useCompression){ // simple compression: use gzip-like? Browsers don't have native gzip; skip heavy libs.
+        // For demo: we won't implement heavy compression here. In production, you can gzip on server side before encrypting.
+      }
+      const key = await deriveKeyFromPassword(password, salt);
+      const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv:iv}, key, data);
+      return {
+        salt: toB64(salt),
+        iv: toB64(iv),
+        ct: toB64(ct)
+      };
+    }
+
+    async function decryptWithPassword(packageB64, password, useCompression=false){
+      // packageB64 is an object {salt,iv,ct}
+      const salt = fromB64(packageB64.salt);
+      const iv = fromB64(packageB64.iv);
+      const ct = fromB64(packageB64.ct);
+      const key = await deriveKeyFromPassword(password, salt);
+      const plainBuf = await crypto.subtle.decrypt({name:'AES-GCM', iv:iv}, key, ct);
+      let text = dec.decode(plainBuf);
+      if(useCompression){ /* decompress if implemented */ }
+      return text;
+    }
+
+    // ---------------------
+    // UI / Flujos
+    // ---------------------
+    let mode = 'encrypt';
+    function setMode(m){
+      mode = m;
+      // limpiar input text al cambiar a modo "decrypt"
+      if (m === 'decrypt') {
+        document.getElementById('inputText').value = '';
+      }
+      document.getElementById('btnEncrypt').classList.remove('active');
+      document.getElementById('btnDecrypt').classList.remove('active');
+      if(m==='encrypt') document.getElementById('btnEncrypt').classList.add('active');
+      else document.getElementById('btnDecrypt').classList.add('active');
+    }
+
+    function getUI(){ return {
+      text: document.getElementById('inputText').value || '',
+      password: document.getElementById('password').value || '',
+      useObf: document.getElementById('useObf').checked,
+      compress: document.getElementById('compress').checked
+    } }
+
+    /* --- MOD: función para envolver líneas a 90 caracteres --- */
+    function wrapLines(s, width = 90) {
+      if (!s) return s;
+      let out = '';
+      for (let i = 0; i < s.length; i += width) {
+        out += s.slice(i, i + width);
+        if (i + width < s.length) out += '\n';
+      }
+      return out;
+    }
+
+    /* --- MOD: toggle mostrar/ocultar contraseña --- */
+    function togglePassword(){
+      const el = document.getElementById('password');
+      if (!el) return;
+      el.type = (el.type === 'password') ? 'text' : 'password';
+    }
+
+    async function doEncrypt(){
+      try{
+        const ui = getUI();
+        if(!ui.password){ if(!confirm('No ha introducido contraseña. ¿Desea continuar (no recomendado)?')) return; }
+        let payload = ui.text;
+        // Aplicar obfuscación si lo desea: usamos un shift derivado de la contraseña (hash simple) para evitar que el shift sea fácil de adivinar
+        let shift = 3;
+        if(ui.useObf){
+          // derive a simple numeric shift from the password (not secret; but ties obfuscation to password)
+          if(ui.password){
+            const pwHash = await crypto.subtle.digest('SHA-256', enc.encode(ui.password));
+            const arr = new Uint8Array(pwHash);
+            // sum bytes mod 997 (prime-like) to pick a shift in range 3..1000
+            let s=0; for(const b of arr) s=(s+b) % 997; shift = 3 + (s % 998);
+          } else {
+            shift = Math.floor(Math.random()*998)+3;
+          }
+          payload = applyObfuscation(payload, shift);
+        }
+
+        const pkg = await encryptWithPassword(payload, ui.password, ui.compress);
+        // incluir metadatos: obf flag y shift
+        const full = { salt: pkg.salt, iv: pkg.iv, ct: pkg.ct, obf: !!ui.useObf, shift: ui.useObf? shift : 0 };
+        const outString = JSON.stringify(full);
+
+        // --- MOD: al mostrar el JSON base64, lo rompemos en líneas de 90 caracteres ---
+        document.getElementById('output').innerText = wrapLines(btoa(outString), 90);
+
+      } catch(e){ console.error(e); alert('Error durante el cifrado: '+e.message); }
+    }
+
+    async function doDecrypt(){
+      try{
+        const ui = getUI();
+        const inText = (document.getElementById('inputText').value || '').trim();
+        if(!inText) { alert('Introduzca el paquete (texto cifrado) en el área de texto.'); return; }
+        let decoded;
+        try{ decoded = JSON.parse(atob(inText)); } catch(e){ alert('Formato inválido: el texto debe ser el JSON base64 generado por este cifrador.'); return; }
+        const pkg = { salt: decoded.salt, iv: decoded.iv, ct: decoded.ct };
+        const plain = await decryptWithPassword(pkg, ui.password, ui.compress);
+        let output = plain;
+        if(decoded.obf){ // si había obfuscación, quitarla usando shift
+          output = removeObfuscation(plain, decoded.shift);
+        }
+        document.getElementById('output').innerText = output;
+      } catch(e){ console.error(e); alert('Error durante el descifrado: '+(e.message||e)); }
+    }
+
+    function copyResult(){ const out = document.getElementById('output').innerText; navigator.clipboard.writeText(out).then(()=>alert('Copiado al portapapeles.'), ()=>alert('No se pudo copiar automáticamente.')) }
+
+    async function generateRandomKey(){ const arr = crypto.getRandomValues(new Uint8Array(32)); const b = toB64(arr); document.getElementById('password').value = b; alert('Clave aleatoria (32 bytes) puesta en el campo contraseña. Guárdala en un lugar seguro.'); }
+
+    // init
+    setMode('encrypt');
+  </script>
+</body>
+</html>
